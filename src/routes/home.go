@@ -2,6 +2,7 @@ package routes
 
 import (
 	"anonymousoverflow/config"
+	"anonymousoverflow/src/types"
 	"anonymousoverflow/src/utils"
 	"fmt"
 	"regexp"
@@ -31,45 +32,36 @@ func translateUrl(rawUrl string) string {
 		return ""
 	}
 
-	// Extract domain and path from the URL
-	domain := strings.TrimSpace(coreMatches[1])
-	rest := coreMatches[2]
+	domain := coreMatches[1] // Extract the domain
+	rest := coreMatches[2]   // Extract the rest of the URL path
 
-	// Clean up the domain by removing any leading or trailing whitespace
-	domain = strings.ToLower(strings.Trim(domain, " "))
-
-	// Define path prefix based on domain
-	var pathPrefix string
-
-	switch {
-	case domain == "stackoverflow.com":
-		pathPrefix = ""
-	case domain == "askubuntu.com":
-		pathPrefix = "/askubuntu"
-	case domain == "serverfault.com":
-		pathPrefix = "/serverfault"
-	case domain == "superuser.com":
-		pathPrefix = "/superuser"
-	case strings.HasSuffix(domain, ".stackexchange.com"):
-		subDomain := strings.TrimSuffix(domain, ".stackexchange.com")
-		if subDomain == "" {
-			return ""
+	exchange := ""
+	// Check if the domain matches "stackoverflow.com" first, as a default
+	if domain == "stackoverflow.com" {
+		// No exchange parameter needed for stackoverflow.com
+	} else {
+		for _, exchangeDomain := range types.ExchangeDomains {
+			if sub, found := strings.CutSuffix(domain, "."+exchangeDomain+".com"); found {
+				if sub == "" {
+					return ""
+				} else if strings.Contains(sub, ".") {
+					// Anything containing dots is interpreted as a full domain, so we use the correct full domain.
+					exchange = domain
+				} else {
+					exchange = sub
+				}
+			} else {
+				exchange = domain
+			}
 		}
-		// Full domain with dots should be used with "/exchange/" prefix
-		pathPrefix = "/exchange/" + domain
-		//	default:
-		//		// Default behavior for other domains
-		//		pathPrefix = "/exchange/" + domain
 	}
 
-	// Ensure proper formatting of the return string
-	if pathPrefix == "" {
+	// Ensure we properly format the return string to avoid double slashes
+	if exchange == "" {
 		return rest
+	} else {
+		return fmt.Sprintf("/exchange/%s%s", exchange, rest)
 	}
-	if strings.HasPrefix(rest, "/") {
-		return fmt.Sprintf("%s%s", pathPrefix, rest)
-	}
-	return fmt.Sprintf("%s/%s", pathPrefix, rest)
 }
 
 func PostHome(c *gin.Context) {
