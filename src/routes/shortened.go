@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"anonymousoverflow/src/types"
+
 	"github.com/gin-gonic/gin"
 	"github.com/go-resty/resty/v2"
 )
@@ -15,31 +17,7 @@ func RedirectShortenedOverflowURL(c *gin.Context) {
 	answerId := c.Param("answerId")
 	sub := c.Param("sub")
 
-	// Define the allowed domains
-	var stackDomains = map[string]bool{
-		"stackoverflow.com": true,
-		"askubuntu.com":     true,
-		"superuser.com":     true,
-		"serverfault.com":   true,
-	}
-
-	// Determine the domain
-	var domain string
-	if stackDomains[sub] {
-		// Directly use the provided domain if it is allowed
-		domain = sub
-	} else if strings.Contains(sub, ".") {
-		// Treat as a default Stack Exchange domain if not in the allowed list
-		domain = "stackoverflow.com"
-	} else if sub != "" {
-		// For non-empty subdomains that are not in stackDomains, treat them as Stack Exchange
-		domain = fmt.Sprintf("%s.stackexchange.com", sub)
-	} else {
-		// Default domain
-		domain = "stackoverflow.com"
-	}
-
-	// Fetch the stack overflow URL
+	// fetch the stack overflow URL
 	client := resty.New()
 	client.SetRedirectPolicy(
 		resty.RedirectPolicyFunc(func(req *http.Request, via []*http.Request) error {
@@ -47,9 +25,23 @@ func RedirectShortenedOverflowURL(c *gin.Context) {
 		}),
 	)
 
-	// Construct the URL to fetch
-	urlToFetch := fmt.Sprintf("https://%s/a/%s/%s", domain, id, answerId)
-	resp, err := client.R().Get(urlToFetch)
+	// Initialize the domain
+	domain := "www.stackoverflow.com"
+
+	// Check if the sub parameter contains a dot (subdomain), indicating it's already a full domain
+	if strings.Contains(sub, ".") {
+		// If subdomain is provided (like "subdomain.stackexchange.com"), use it directly
+		domain = sub
+	} else if sub != "" {
+		// If it's just a simple name (like "askubuntu"), look for it in the ExchangeDomains list
+		for _, exchangeDomain := range types.ExchangeDomains {
+			if strings.Contains(sub, exchangeDomain) {
+				// If it's a valid exchange domain, format it as "example.com"
+				domain = fmt.Sprintf("%s.%s.com", sub, exchangeDomain)
+			}
+		}
+	}
+	resp, err := client.R().Get(fmt.Sprintf("https://%s/a/%s/%s", domain, id, answerId))
 	if err != nil {
 		c.HTML(400, "home.html", gin.H{
 			"errorMessage": "Unable to fetch stack overflow URL",
@@ -64,31 +56,12 @@ func RedirectShortenedOverflowURL(c *gin.Context) {
 		return
 	}
 
-	// Get the redirect URL
+	// get the redirect URL
 	location := resp.Header().Get("Location")
 
-	// Determine the correct path prefix based on the domain
-	var pathPrefix string
-	switch {
-	case domain == "askubuntu.com":
-		pathPrefix = "/askubuntu"
-	case domain == "serverfault.com":
-		pathPrefix = "/serverfault"
-	case domain == "superuser.com":
-		pathPrefix = "/superuser"
-	case strings.HasSuffix(domain, ".stackexchange.com"):
-		subDomain := strings.TrimSuffix(domain, ".stackexchange.com")
-		pathPrefix = "/exchange/" + subDomain
-	default:
-		pathPrefix = "/exchange"
-	}
-
-	// Construct the redirect URL
 	redirectPrefix := os.Getenv("APP_URL")
 	if sub != "" {
-		redirectPrefix += pathPrefix
-	} else {
-		redirectPrefix += "/exchange"
+		redirectPrefix += fmt.Sprintf("/%s", sub)
 	}
 
 	c.Redirect(302, fmt.Sprintf("%s%s", redirectPrefix, location))
