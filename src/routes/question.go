@@ -28,15 +28,8 @@ var soSortValues = map[string]string{
 	"oldest":   "createdasc",
 }
 
-// Define the allowed domains
-var stackDomains = map[string]bool{
-	"stackoverflow.com": true,
-	"askubuntu.com":     true,
-	"superuser.com":     true,
-	"serverfault.com":   true,
-}
-
 func ViewQuestion(c *gin.Context) {
+
 	questionId := c.Param("id")
 	if _, err := strconv.Atoi(questionId); err != nil {
 		c.HTML(400, "home.html", gin.H{
@@ -51,27 +44,27 @@ func ViewQuestion(c *gin.Context) {
 		return
 	}
 
-	var domain string
-	if stackDomains[params.Sub] {
-		// Directly use the provided domain if it is allowed
+	// Initialize the domain
+	domain := "www.stackoverflow.com"
+
+	// If there is a subdomain (with a dot), use it directly
+	if strings.Contains(params.Sub, ".") {
 		domain = params.Sub
-	} else if strings.Contains(params.Sub, ".") {
-		// Treat as a default Stack Exchange domain if not in the allowed list
-		domain = "stackoverflow.com"
 	} else if params.Sub != "" {
-		// For non-empty subdomains that are not in stackDomains, treat them as Stack Exchange
-		domain = fmt.Sprintf("%s.stackexchange.com", params.Sub)
-	} else {
-		// Default domain
-		domain = "stackoverflow.com"
+		// If it's just a simple name (like "askubuntu"), look for it in the ExchangeDomains list
+		for _, exchangeDomain := range types.ExchangeDomains {
+			if strings.Contains(params.Sub, exchangeDomain) {
+				// If it's a valid exchange domain, format it as "example.com"
+				domain = fmt.Sprintf("%s.%s.com", params.Sub, exchangeDomain)
+			}
+		}
 	}
 
-	// Construct the URL
 	soLink := fmt.Sprintf("https://%s/questions/%s/%s?answertab=%s", domain, questionId, params.QuestionTitle, params.SoSortValue)
 
-	// Fetch question data
 	resp, err := fetchQuestionData(soLink)
-	if err != nil || resp.StatusCode() != 200 {
+
+	if resp.StatusCode() != 200 {
 		c.HTML(500, "home.html", gin.H{
 			"errorMessage": fmt.Sprintf("Received a non-OK status code %d", resp.StatusCode()),
 			"version":      config.Version,
@@ -79,8 +72,12 @@ func ViewQuestion(c *gin.Context) {
 		return
 	}
 
+	// Parse the response body
 	respBody := resp.String()
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(respBody))
+	respBodyReader := strings.NewReader(respBody)
+
+	// Parse the question page with goquery
+	doc, err := goquery.NewDocumentFromReader(respBodyReader)
 	if err != nil {
 		c.HTML(500, "home.html", gin.H{
 			"errorMessage": "Unable to parse question data",
@@ -89,6 +86,7 @@ func ViewQuestion(c *gin.Context) {
 		return
 	}
 
+	// Extract question data
 	newFilteredQuestion, err := extractQuestionData(doc, domain)
 	if err != nil {
 		c.HTML(500, "home.html", gin.H{
@@ -98,6 +96,7 @@ func ViewQuestion(c *gin.Context) {
 		return
 	}
 
+	// Extract answer data
 	answers, err := extractAnswersData(doc, domain)
 	if err != nil {
 		c.HTML(500, "home.html", gin.H{
@@ -107,43 +106,27 @@ func ViewQuestion(c *gin.Context) {
 		return
 	}
 
-	// Determine the correct path prefix
-	var pathPrefix string
-	switch domain {
-	case "askubuntu.com":
-		pathPrefix = "/askubuntu"
-	case "serverfault.com":
-		pathPrefix = "/serverfault"
-	case "superuser.com":
-		pathPrefix = "/superuser"
-	default:
-		if strings.HasSuffix(domain, ".stackexchange.com") {
-			subDomain := strings.TrimSuffix(domain, ".stackexchange.com")
-			pathPrefix = "/exchange/" + subDomain
-		} else {
-			pathPrefix = "/exchange/" + domain
-		}
-	}
-
-	// Construct the new URL for the current context
-	currentUrlPath := fmt.Sprintf("%s%s", pathPrefix, c.Request.URL.Path)
-
+	// Set content security policy for images based on settings
 	imagePolicy := "'self' https:"
+
 	if c.MustGet("disable_images").(bool) {
 		imagePolicy = "'self'"
 	}
 
+	// Get the theme from the environment settings
 	theme := utils.GetThemeFromEnv()
 
+	// Render the question and answers in the HTML response
 	c.HTML(200, "question.html", gin.H{
 		"question":    newFilteredQuestion,
 		"answers":     answers,
 		"imagePolicy": imagePolicy,
-		"currentUrl":  fmt.Sprintf("%s%s", os.Getenv("APP_URL"), currentUrlPath),
+		"currentUrl":  fmt.Sprintf("%s%s", os.Getenv("APP_URL"), c.Request.URL.Path),
 		"sortValue":   params.SoSortValue,
 		"domain":      domain,
 		"theme":       theme,
 	})
+
 }
 
 type viewQuestionInputs struct {
