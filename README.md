@@ -1,8 +1,15 @@
-# AnonymousExchange
+# AnonExchange
 
-Fork of AnonymousOverflow that works on all StackExchange sites.
+Fork of AnonymousOverflow that works on all StackExchange sites. Including:
 
-## Why use AnonymousExchange over StackExchange?
+- StackOverflow
+- StackExchange
+- AskUbuntu
+- SuperUser
+- ServerFault
+- StackApps
+
+## Why use AnonExchange over StackExchange?
 
 -   StackOverflow collects a lot of information
 
