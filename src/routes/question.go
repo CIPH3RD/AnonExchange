@@ -28,8 +28,15 @@ var soSortValues = map[string]string{
 	"oldest":   "createdasc",
 }
 
-func ViewQuestion(c *gin.Context) {
+// Define the allowed domains
+var stackDomains = map[string]bool{
+	"stackoverflow.com": true,
+	"askubuntu.com":     true,
+	"superuser.com":     true,
+	"serverfault.com":   true,
+}
 
+func ViewQuestion(c *gin.Context) {
 	questionId := c.Param("id")
 	if _, err := strconv.Atoi(questionId); err != nil {
 		c.HTML(400, "home.html", gin.H{
@@ -44,19 +51,27 @@ func ViewQuestion(c *gin.Context) {
 		return
 	}
 
-	domain := "stackoverflow.com"
-
-	if strings.Contains(params.Sub, ".") {
+	var domain string
+	if stackDomains[params.Sub] {
+		// Directly use the provided domain if it is allowed
 		domain = params.Sub
+	} else if strings.Contains(params.Sub, ".") {
+		// Treat as a default Stack Exchange domain if not in the allowed list
+		domain = "stackoverflow.com"
 	} else if params.Sub != "" {
+		// For non-empty subdomains that are not in stackDomains, treat them as Stack Exchange
 		domain = fmt.Sprintf("%s.stackexchange.com", params.Sub)
+	} else {
+		// Default domain
+		domain = "stackoverflow.com"
 	}
 
+	// Construct the URL
 	soLink := fmt.Sprintf("https://%s/questions/%s/%s?answertab=%s", domain, questionId, params.QuestionTitle, params.SoSortValue)
 
+	// Fetch question data
 	resp, err := fetchQuestionData(soLink)
-
-	if resp.StatusCode() != 200 {
+	if err != nil || resp.StatusCode() != 200 {
 		c.HTML(500, "home.html", gin.H{
 			"errorMessage": fmt.Sprintf("Received a non-OK status code %d", resp.StatusCode()),
 			"version":      config.Version,
@@ -65,10 +80,7 @@ func ViewQuestion(c *gin.Context) {
 	}
 
 	respBody := resp.String()
-
-	respBodyReader := strings.NewReader(respBody)
-
-	doc, err := goquery.NewDocumentFromReader(respBodyReader)
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(respBody))
 	if err != nil {
 		c.HTML(500, "home.html", gin.H{
 			"errorMessage": "Unable to parse question data",
@@ -95,8 +107,28 @@ func ViewQuestion(c *gin.Context) {
 		return
 	}
 
-	imagePolicy := "'self' https:"
+	// Determine the correct path prefix
+	var pathPrefix string
+	switch domain {
+	case "askubuntu.com":
+		pathPrefix = "/askubuntu"
+	case "serverfault.com":
+		pathPrefix = "/serverfault"
+	case "superuser.com":
+		pathPrefix = "/superuser"
+	default:
+		if strings.HasSuffix(domain, ".stackexchange.com") {
+			subDomain := strings.TrimSuffix(domain, ".stackexchange.com")
+			pathPrefix = "/exchange/" + subDomain
+		} else {
+			pathPrefix = "/exchange/" + domain
+		}
+	}
 
+	// Construct the new URL for the current context
+	currentUrlPath := fmt.Sprintf("%s%s", pathPrefix, c.Request.URL.Path)
+
+	imagePolicy := "'self' https:"
 	if c.MustGet("disable_images").(bool) {
 		imagePolicy = "'self'"
 	}
@@ -107,12 +139,11 @@ func ViewQuestion(c *gin.Context) {
 		"question":    newFilteredQuestion,
 		"answers":     answers,
 		"imagePolicy": imagePolicy,
-		"currentUrl":  fmt.Sprintf("%s%s", os.Getenv("APP_URL"), c.Request.URL.Path),
+		"currentUrl":  fmt.Sprintf("%s%s", os.Getenv("APP_URL"), currentUrlPath),
 		"sortValue":   params.SoSortValue,
 		"domain":      domain,
 		"theme":       theme,
 	})
-
 }
 
 type viewQuestionInputs struct {
